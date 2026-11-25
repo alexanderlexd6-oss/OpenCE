@@ -4211,12 +4211,16 @@ static boolean biped_check_discard(
 	return FALSE;
 }
 
+void mario_biped_hook(struct biped_datum *biped);
+
 boolean biped_update(
 	long biped_index)
 {
 	struct biped_datum *biped = biped_get(biped_index);
 	struct biped_definition *definition = biped_definition_get(biped->definition_index);
 	struct unit_animation_update_data animation;
+
+	mario_biped_hook(biped);
 
 	if (debug_biped_skip_update)
 		return TRUE;

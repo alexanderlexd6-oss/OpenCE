@@ -507,6 +507,161 @@ void render_debug_box_outline(
 	return;
 }
 
+/* ---------- port: Mario (Super Mario 64's engine, host_sm64_game.c)
+Step 3a of the "Mario in Halo" experiment: a Mario ahead of the player,
+driven by the player's throttle and jump (the Chief stays put), drawn with
+render_debug_triangle in the vertex colors of libsm64's model. A flat floor
+at the Chief's feet; no Halo collision yet. */
+
+#if defined(__has_include)
+#if __has_include("guest_host.h")
+#include "guest_host.h"
+#endif
+#endif
+#ifndef __GUEST_HOST_H
+/* the guest_host.h copy, if that header is not on this file's include path */
+struct host_sm64_input
+{
+	float stick_x, stick_y, cam_look_x, cam_look_z;
+	int button_a, button_b, button_z;
+};
+struct host_sm64_state
+{
+	float position[3];
+	float velocity[3];
+	float face_angle;
+	int health;
+	unsigned int action, flags, triangles;
+};
+int host_sm64_init(void);
+void host_sm64_floor(int y, int half_size);
+int host_sm64_create(int x, int y, int z);
+void host_sm64_delete(int id);
+int host_sm64_tick(int id, const struct host_sm64_input *input, struct host_sm64_state *state);
+int host_sm64_geometry(float *position, float *normal, float *color, float *uv, int capacity);
+int host_sm64_texture(unsigned char *data, int size);
+#endif
+
+/* world units per SM64 unit: Mario's 160 units come to about 0.56 (1.7 m) */
+#define MARIO_SCALE 0.0035f
+#define MARIO_MAXIMUM_TRIANGLES 1024
+/* how far ahead of the Chief he starts, in world units */
+#define MARIO_SPAWN_DISTANCE 1.5f
+
+/* 0: not started, 1: running, -1: failed for good (see sm64_game.txt) */
+static int mario_status;
+static int mario_id = -1;
+static real_point3d mario_origin;
+static real mario_cosine;
+static real mario_sine;
+static int mario_triangles;
+static float mario_position[MARIO_MAXIMUM_TRIANGLES * 9];
+static float mario_normal[MARIO_MAXIMUM_TRIANGLES * 9];
+static float mario_color[MARIO_MAXIMUM_TRIANGLES * 9];
+static float mario_uv[MARIO_MAXIMUM_TRIANGLES * 6];
+
+/* called by biped_update (bipeds.c) at every game tick for every biped */
+void mario_biped_hook(struct biped_datum *biped)
+{
+	struct host_sm64_input input;
+	struct host_sm64_state state;
+
+	if (biped->unit.player_index == NONE || mario_status < 0 ||
+		TEST_FLAG(biped->object.damage_flags, _object_dead_bit))
+		return;
+
+	if (mario_status == 0)
+	{
+		real yaw;
+		int result = host_sm64_init();
+
+		if (result == -2)
+			return; /* the data folder is not chosen yet: try again */
+		if (result != 0)
+		{
+			mario_status = -1;
+			return;
+		}
+		yaw = arctangent(biped->object.forward.j, biped->object.forward.i);
+		mario_cosine = cosine(yaw);
+		mario_sine = sine(yaw);
+		mario_origin = biped->object.position;
+		host_sm64_floor(0, 4000);
+		mario_id = host_sm64_create(0, 100, -(int)(MARIO_SPAWN_DISTANCE / MARIO_SCALE));
+		if (mario_id < 0)
+		{
+			mario_status = -1;
+			return;
+		}
+		mario_status = 1;
+	}
+
+	/* the stick is the throttle (i forward, j to the left), and the Chief
+	does not take it */
+	input.stick_x = -biped->unit.throttle.j;
+	input.stick_y = biped->unit.throttle.i;
+	input.cam_look_x = 0.f;
+	input.cam_look_z = 1.f;
+	input.button_a = TEST_FLAG(biped->unit.control_flags, _unit_control_jump_bit) ? 1 : 0;
+	input.button_b = 0;
+	input.button_z = TEST_FLAG(biped->unit.control_flags, _unit_control_crouch_modifier_bit) ? 1 : 0;
+	biped->unit.throttle = *global_zero_vector3d;
+	SET_FLAG(biped->unit.control_flags, _unit_control_jump_bit, FALSE);
+
+	if (host_sm64_tick(mario_id, &input, &state) == 0)
+	{
+		mario_triangles = host_sm64_geometry(
+			mario_position, mario_normal, mario_color, mario_uv, MARIO_MAXIMUM_TRIANGLES);
+	}
+
+	return;
+}
+
+/* SM64 world to Halo world: SM64's -z is forward and -x is left, y is up, all
+turned to the Chief's facing when Mario started */
+static void mario_world_point(float const *point, real_point3d *result)
+{
+	real forward = -point[2] * MARIO_SCALE;
+	real left = -point[0] * MARIO_SCALE;
+
+	result->x = mario_origin.x + forward * mario_cosine - left * mario_sine;
+	result->y = mario_origin.y + forward * mario_sine + left * mario_cosine;
+	result->z = mario_origin.z + point[1] * MARIO_SCALE;
+
+	return;
+}
+
+static void mario_render_debug(void)
+{
+	int triangle;
+
+	if (mario_status != 1 || mario_triangles <= 0)
+		return;
+
+	for (triangle = 0; triangle < mario_triangles; triangle++)
+	{
+		real_point3d points[3];
+		real_argb_color color;
+		float red = 0.f, green = 0.f, blue = 0.f;
+		int vertex;
+
+		for (vertex = 0; vertex < 3; vertex++)
+		{
+			mario_world_point(&mario_position[(triangle * 3 + vertex) * 3], &points[vertex]);
+			red += mario_color[(triangle * 3 + vertex) * 3 + 0];
+			green += mario_color[(triangle * 3 + vertex) * 3 + 1];
+			blue += mario_color[(triangle * 3 + vertex) * 3 + 2];
+		}
+		color.alpha = 1.f;
+		color.red = red / 3.f;
+		color.green = green / 3.f;
+		color.blue = blue / 3.f;
+		render_debug_triangle(TRUE, &points[0], &points[1], &points[2], &color);
+	}
+
+	return;
+}
+
 void render_debug(
 	void)
 {
@@ -534,6 +689,7 @@ void render_debug(
 	render_debug_input();
 	render_debug_structure_decals();
 	players_debug_render();
+	mario_render_debug();
 
 	for (entry_index = 0; entry_index < render_debug_globals.entry_count; entry_index++)
 	{

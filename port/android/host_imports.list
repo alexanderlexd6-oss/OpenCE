@@ -106,3 +106,11 @@ host_steam_install_progress
 host_steam_take_rescan
 # a Workshop item's author's name, for the lobby (port/linux/src/workshop_authors.c)
 host_steam_author
+# Super Mario 64's engine (port/android/host/host_sm64_game.c)
+host_sm64_init
+host_sm64_floor
+host_sm64_create
+host_sm64_delete
+host_sm64_tick
+host_sm64_geometry
+host_sm64_texture

@@ -205,5 +205,30 @@ int host_steam_take_rescan(void);
 /* a Workshop item's author's name, asked of Steam on the host's thread (port/linux/src/workshop_authors.c's
 workshop_authors_get) */
 int host_steam_author(unsigned int item_id, unsigned int name, int name_size);
+/* ---------- Super Mario 64's engine (host_sm64_game.c) */
+
+struct host_sm64_input
+{
+	float stick_x, stick_y, cam_look_x, cam_look_z;
+	int button_a, button_b, button_z;
+};
+struct host_sm64_state
+{
+	float position[3];
+	float velocity[3];
+	float face_angle;
+	int health;
+	unsigned int action, flags, triangles;
+};
+/* loads libsm64 and the ROM, once: 0 ready, negative if not (-2: try again later) */
+int host_sm64_init(void);
+void host_sm64_floor(int y, int half_size);
+int host_sm64_create(int x, int y, int z);
+void host_sm64_delete(int id);
+/* one step at 30 Hz; it waits out the rest of 34 ms since the last one */
+int host_sm64_tick(int id, const struct host_sm64_input *input, struct host_sm64_state *state);
+/* copies the last tick's triangles (9 floats each, uv 6): their count */
+int host_sm64_geometry(float *position, float *normal, float *color, float *uv, int capacity);
+int host_sm64_texture(unsigned char *data, int size);
 
 #endif
